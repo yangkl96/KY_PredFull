@@ -208,5 +208,5 @@ for i in range(len(metas)):
 #NOTE: check what shape predict function has it as
 
 #pm.fit(x=asnp32(x), y=asnp32(y), epochs=50, verbose=1)
-pm.fit(x=[embeddings_array, metas_array], y=y_array, epochs=args.epochs, verbose=1)
+pm.fit(x=[embeddings_array, metas_array], y=y_array, epochs=args.epochs, verbose=1, validation_size = 0.1)
 pm.save(args.out)
