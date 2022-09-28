@@ -102,6 +102,7 @@ parser.add_argument('--fragmentation', type=str, help='fragmentation method (HCD
 parser.add_argument('--min_score', type=int, help='minimum Andromeda score', default = 100)
 parser.add_argument('--nce', type=int, help='normalized collision energy', default = 30)
 parser.add_argument('--epochs', type=int, help='number of epochs to transfer learn model', default = 20)
+parser.add_argument('--lr', type=float, help='learning rate', default = 0.0003)
 parser.add_argument('--out', type=str, help='filename to save the transfer learned model', default = "")
 
 args = parser.parse_args()
@@ -167,7 +168,7 @@ pm = k.models.load_model(args.base_model)
 #if we want to replace final CNN layer
 for layer in pm.layers[0:len(pm.layers) - 3]:
     layer.trainable = False
-    pm.compile(optimizer=k.optimizers.Adam(lr=0.0003), loss='cosine_similarity')
+    pm.compile(optimizer=k.optimizers.Adam(lr=args.lr), loss='cosine_similarity')
 #print(pm.summary())
 
 #if we want to add another CNN layer
