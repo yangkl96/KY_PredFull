@@ -7,6 +7,8 @@ import os
 import pandas as pd
 import sys
 import utils
+import random
+random.seed(123)
 
 import tensorflow as tf
 import tensorflow.keras as k
@@ -99,7 +101,7 @@ parser.add_argument('--mgf_folder', type=str, help='folder with mgf files')
 parser.add_argument('--msms_folder', type=str, help='folder with msms identifications') #
 parser.add_argument('--base_model', type=str, help='base model to transfer learn on', default="pm.h5")
 parser.add_argument('--fragmentation', type=str, help='fragmentation method (HCD, CID, etc)', default = "hcd") #
-parser.add_argument('--min_score', type=int, help='minimum Andromeda score', default = 100)
+parser.add_argument('--min_score', type=int, help='minimum Andromeda score', default = 150)
 parser.add_argument('--nce', type=int, help='normalized collision energy', default = 30)
 parser.add_argument('--epochs', type=int, help='number of epochs to transfer learn model', default = 20)
 parser.add_argument('--lr', type=float, help='learning rate', default = 0.0003)
@@ -168,7 +170,10 @@ pm = k.models.load_model(args.base_model)
 #if we want to replace final CNN layer
 for layer in pm.layers[0:len(pm.layers) - 3]:
     layer.trainable = False
-    pm.compile(optimizer=k.optimizers.Adam(lr=args.lr), loss='cosine_similarity')
+
+pm.compile(optimizer=k.optimizers.Adam(lr=k.optimizers.schedules.ExponentialDecay(
+    args.lr, decay_steps=50000, decay_rate = 0.95, staircase=False, name=None), amsgrad = True), loss='cosine_similarity')
+
 #print(pm.summary())
 
 #if we want to add another CNN layer
@@ -194,20 +199,22 @@ y = [spectrum2vector(sp['mz'], sp['it'], sp['mass'], utils.precision, sp['charge
 infos = utils.preprocessor(spectra)
 embeddings = [info for info in infos[0]]
 metas = [info for info in infos[1]]
+idx = list(range(len(y)))
+random.shuffle(idx)
 
 y_array = np.zeros((len(y), len(y[0])))
 for i in range(len(y)):
-    y_array[i] = y[i]
+    y_array[idx[i]] = y[i]
 embeddings_array = np.zeros((len(embeddings), embeddings[0].shape[0], embeddings[0].shape[1]))
 for i in range(len(embeddings)):
-    embeddings_array[i] = embeddings[i]
+    embeddings_array[idx[i]] = embeddings[i]
 metas_array = np.zeros((len(metas), metas[0].shape[0], metas[0].shape[1]))
 for i in range(len(metas)):
-    metas_array[i] = metas[i]
+    metas_array[idx[i]] = metas[i]
 
 #make a version where instead it makes numpy array from list of flattened numpy arrays
 #NOTE: check what shape predict function has it as
 
 #pm.fit(x=asnp32(x), y=asnp32(y), epochs=50, verbose=1)
-pm.fit(x=[embeddings_array, metas_array], y=y_array, epochs=args.epochs, verbose=1, validation_size = 0.1)
+pm.fit(x=[embeddings_array, metas_array], y=y_array, epochs=args.epochs, verbose=1, validation_split = 0.1)
 pm.save(args.out)
