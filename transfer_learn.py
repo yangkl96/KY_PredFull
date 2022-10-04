@@ -108,6 +108,9 @@ parser.add_argument('--lr', type=float, help='learning rate', default = 0.0003)
 parser.add_argument('--out', type=str, help='filename to save the transfer learned model', default = "")
 
 args = parser.parse_args()
+if os.path.getsize(args.base_model) < 1000:
+    print("You might have wrong pm.h5 model. Please download from https://drive.google.com/drive/folders/1Ca3HdV-w8TZPRa9KhPBbjrTtGSmtEIsn")
+    sys.exit(0)
 
 if args.out == "":
     print("must include transfer learned model name with --out")
