@@ -8,6 +8,7 @@ import pandas as pd
 import sys
 import utils
 import datetime
+import re
 import random
 random.seed(123)
 
@@ -206,7 +207,16 @@ else:
 
 
 print('Reading mgf...')
-spectra = readmgf(args.filtered_mgf)
+old_spectra = readmgf(args.filtered_mgf)
+spectra = []
+for sp in old_spectra:
+    add = True
+    mods = [m.start() for m in re.finditer("(", sp["pep"]]
+    for mod in mods:
+        if sp["pep"][mod + 1:mod + 4] != "ox)":
+            add = False
+    if add:
+        spectra.append(sp)
 
 for sp in spectra:
     utils.xshape[0] = max(utils.xshape[0], len(sp["pep"]) + 2)  # update xshape to match max input peptide
