@@ -211,7 +211,7 @@ old_spectra = readmgf(args.filtered_mgf)
 spectra = []
 for sp in old_spectra:
     add = True
-    mods = [m.start() for m in re.finditer("(", sp["pep"])]
+    mods = [m.start() for m in re.finditer("\\(", sp["pep"])]
     for mod in mods:
         if sp["pep"][mod + 1:mod + 4] != "ox)":
             add = False
