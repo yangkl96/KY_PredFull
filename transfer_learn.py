@@ -105,6 +105,7 @@ parser.add_argument('--fragmentation', type=str, help='fragmentation method (HCD
 parser.add_argument('--min_score', type=int, help='minimum Andromeda score', default = 150)
 parser.add_argument('--nce', type=int, help='normalized collision energy', default = 30)
 parser.add_argument('--epochs', type=str, help='number of epochs to transfer learn model', default = 20)
+parser.add_argument('--batch_size', type=str, help='batch size for training', default = 1024)
 parser.add_argument('--lr', type=str, help='learning rate', default = 0.0003)
 parser.add_argument('--from_scratch', type=bool, help='whether to retrain entire model', default = False)
 parser.add_argument('--out', type=str, help='filename to save the transfer learned model', default = "")
@@ -232,19 +233,22 @@ for i in range(len(metas)):
 #NOTE: check what shape predict function has it as
 
 #pm.fit(x=asnp32(x), y=asnp32(y), epochs=50, verbose=1)
-if "," in args.lr or "," in args.epochs:
+if "," in args.lr or "," in args.epochs or "," in args.batch_size:
     lrs = args.lr.split(",")
     epochs = args.epochs.split(",")
+    batch_sizes = args.batch_size.split(",")
     for lr in lrs:
         for epoch in epochs:
-            pm.compile(optimizer=k.optimizers.Adam(learning_rate=k.optimizers.schedules.ExponentialDecay(
-                float(lr), decay_steps=50000, decay_rate=0.95, staircase=False, name=None), amsgrad=True),
-                loss='cosine_similarity')
-            pm.fit(x=[embeddings_array, metas_array], y=y_array, epochs=int(epoch), verbose=1,
-                   validation_split=0.1)
-            pm.save(args.out.replace(".h5", "") + "_lr" + lr + "_epoch" + epoch + ".h5")
+            for batch_s in batch_sizes:
+                pm.compile(optimizer=k.optimizers.Adam(learning_rate=k.optimizers.schedules.ExponentialDecay(
+                    float(lr), decay_steps=50000, decay_rate=0.95, staircase=False, name=None), amsgrad=True),
+                    loss='cosine_similarity')
+                pm.fit(x=[embeddings_array, metas_array], y=y_array, epochs=int(epoch), batch_size = int(batch_s),
+                       verbose=1, validation_split=0.1)
+                pm.save(args.out.replace(".h5", "") + "_lr" + lr + "_epoch" + epoch + ".h5")
 else:
     pm.compile(optimizer=k.optimizers.Adam(learning_rate=k.optimizers.schedules.ExponentialDecay(
         float(args.lr), decay_steps=50000, decay_rate = 0.95, staircase=False, name=None), amsgrad = True), loss='cosine_similarity')
-    pm.fit(x=[embeddings_array, metas_array], y=y_array, epochs=int(args.epochs), verbose=1, validation_split = 0.1)
+    pm.fit(x=[embeddings_array, metas_array], y=y_array, epochs=int(args.epochs), batch_size = int(args.batch_size),
+           verbose=1, validation_split = 0.1)
     pm.save(args.out)
