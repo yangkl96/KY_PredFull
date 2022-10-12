@@ -7,6 +7,7 @@ import os
 import pandas as pd
 import sys
 import utils
+import datetime
 import random
 random.seed(123)
 
@@ -103,9 +104,12 @@ parser.add_argument('--base_model', type=str, help='base model to transfer learn
 parser.add_argument('--fragmentation', type=str, help='fragmentation method (HCD, CID, etc)', default = "hcd") #
 parser.add_argument('--min_score', type=int, help='minimum Andromeda score', default = 150)
 parser.add_argument('--nce', type=int, help='normalized collision energy', default = 30)
-parser.add_argument('--epochs', type=int, help='number of epochs to transfer learn model', default = 20)
-parser.add_argument('--lr', type=float, help='learning rate', default = 0.0003)
+parser.add_argument('--epochs', type=str, help='number of epochs to transfer learn model', default = 20)
+parser.add_argument('--lr', type=str, help='learning rate', default = 0.0003)
+parser.add_argument('--from_scratch', type=bool, help='whether to retrain entire model', default = False)
 parser.add_argument('--out', type=str, help='filename to save the transfer learned model', default = "")
+parser.add_argument('--processing_only', action=argparse.BooleanOptionalAction,
+                    help='whether to just do preprocessing of files', default=False)
 
 args = parser.parse_args()
 if not os.path.exists(args.base_model):
@@ -116,57 +120,61 @@ if os.path.getsize(args.base_model) < 1000:
     sys.exit(0)
 
 if args.out == "":
-    print("must include transfer learned model name with --out")
-    sys.exit()
-if args.nce == "":
-    print("must include normalized collision energy value with --nce")
-    sys.exit()
-
+    args.out = str(datetime.datetime.now()).replace(" ", "_") + ".h5"
+    print("setting model output location to " + args.out)
 if args.filtered_mgf == "":
     #preparing annotated mgf files first
     filtered_mgf = []
-    for root, dirs, files in os.walk(args.msms_folder):
-        for file in files:
-            if file == "msms.txt":
-                df = pd.read_csv(os.path.join(root, file), sep="\t")
-                df = df[df["Score"] >= args.min_score]
-                df = df[df["Fragmentation"].str.lower() == args.fragmentation.lower()]
+    msms_folders = args.msms_folder.split(",")
+    mgf_folders = args.mgf_folder.split(",")
+    for msms_f, mgf_f in zip(msms_folders, mgf_folders):
+        print(msms_f + ";" + mgf_f)
+        for root, dirs, files in os.walk(msms_f):
+            for file in files:
+                if file == "msms.txt":
+                    print(os.path.join(root, file))
+                    df = pd.read_csv(os.path.join(root, file), sep="\t")
+                    df = df[df["Score"] >= args.min_score]
+                    df = df[df["Fragmentation"].str.lower() == args.fragmentation.lower()]
+                    if df.shape[0] == 0:
+                        continue
 
-                df_dict = {}
-                def get_dict_entry(x):
-                    df_dict[x["Scan number"]] = x["Modified sequence"][1:len(x["Modified sequence"]) - 1]#.replace("M(ox)", "m")
-                df.apply(lambda x: get_dict_entry(x), axis = 1)
+                    df_dict = {}
+                    def get_dict_entry(x):
+                        df_dict[x["Scan number"]] = x["Modified sequence"][1:len(x["Modified sequence"]) - 1]#.replace("M(ox)", "m")
+                    df.apply(lambda x: get_dict_entry(x), axis = 1)
 
-                # read in potential mgf files
-                mgf_file = args.mgf_folder + "/" + df["Raw file"].values[0] + ".mgf"
-                if not os.path.exists(mgf_file):
-                    continue
-                print(mgf_file)
-                spectra = readmgf(mgf_file)
+                    # read in potential mgf files
+                    mgf_file = mgf_f + "/" + df["Raw file"].values[0] + ".mgf"
+                    if not os.path.exists(mgf_file):
+                        continue
+                    spectra = readmgf(mgf_file)
 
-                for sp in spectra:
-                    #check if sp is suitable for inclusion, based on predfull data preprocessing standards, and has ID
-                    length = len(sp["mz"])
-                    scan_num = int(sp["pep"].split(" ")[0].split(".")[1])
-                    if length > 20: #underfragmented
-                        if length < 500: #overfragmented
-                            if scan_num in df_dict.keys():
-                                #can't seem to find entries with >200 ppm difference?
-                                sp["params"] = {}
-                                sp["params"]["charge"] = sp["charge"]
-                                sp["params"]["pepmass"] = sp["mass"]
-                                sp["params"]["seq"] = df_dict[scan_num]
-                                #MAX_PEPTIDE_LENGTH = np.max(MAX_PEPTIDE_LENGTH, df_dict[scan_num] + 2)
-                                sp["params"]["nce"] = args.nce #can try making charge dependent, and add a default
-                                sp["m/z array"] = sp["mz"]
-                                sp["intensity array"] = sp["it"]
-                                filtered_mgf.append(sp)
+                    for sp in spectra:
+                        #check if sp is suitable for inclusion, based on predfull data preprocessing standards, and has ID
+                        length = len(sp["mz"])
+                        scan_num = int(sp["pep"].split(" ")[0].split(".")[1])
+                        if length > 20: #underfragmented
+                            if length < 500: #overfragmented
+                                if scan_num in df_dict.keys():
+                                    #can't seem to find entries with >200 ppm difference?
+                                    sp["params"] = {}
+                                    sp["params"]["charge"] = sp["charge"]
+                                    sp["params"]["pepmass"] = sp["mass"]
+                                    sp["params"]["seq"] = df_dict[scan_num]
+                                    #MAX_PEPTIDE_LENGTH = np.max(MAX_PEPTIDE_LENGTH, df_dict[scan_num] + 2)
+                                    sp["params"]["nce"] = args.nce #can try making charge dependent, and add a default
+                                    sp["m/z array"] = sp["mz"]
+                                    sp["intensity array"] = sp["it"]
+                                    filtered_mgf.append(sp)
 #            if len(filtered_mgf) > 0:
 #                break
-    
-    mgf.write(filtered_mgf, output = args.mgf_folder + "/filtered.mgf", file_mode = "w")
-    args.filtered_mgf = args.mgf_folder + "/filtered.mgf"
-
+    print("writing filtered mgf at " + mgf_folders[0] + "/filtered.mgf")
+    mgf.write(filtered_mgf, output = mgf_folders[0] + "/filtered.mgf", file_mode = "w")
+    args.filtered_mgf = mgf_folders[0] + "/filtered.mgf"
+if args.processing_only:
+    print("processing done")
+    sys.exit(0)
 K.clear_session()
 
 pm = k.models.load_model(args.base_model)
@@ -174,11 +182,13 @@ pm = k.models.load_model(args.base_model)
 #adding parts for transfer learning (2 options)
 
 #if we want to replace final CNN layer
-for layer in pm.layers[0:len(pm.layers) - 3]:
-    layer.trainable = False
-
-pm.compile(optimizer=k.optimizers.Adam(lr=k.optimizers.schedules.ExponentialDecay(
-    args.lr, decay_steps=50000, decay_rate = 0.95, staircase=False, name=None), amsgrad = True), loss='cosine_similarity')
+#could have option to retrain entire thing
+if args.from_scratch: #explicitly state that they are trainable, might be redundant
+    for layer in pm.layers:
+        layer.trainable = True
+else:
+    for layer in pm.layers[0:len(pm.layers) - 3]:
+        layer.trainable = False
 
 #print(pm.summary())
 
@@ -222,5 +232,19 @@ for i in range(len(metas)):
 #NOTE: check what shape predict function has it as
 
 #pm.fit(x=asnp32(x), y=asnp32(y), epochs=50, verbose=1)
-pm.fit(x=[embeddings_array, metas_array], y=y_array, epochs=args.epochs, verbose=1, validation_split = 0.1)
-pm.save(args.out)
+if "," in args.lr or "," in args.epochs:
+    lrs = args.lr.split(",")
+    epochs = args.epochs.split(",")
+    for lr in lrs:
+        for epoch in epochs:
+            pm.compile(optimizer=k.optimizers.Adam(learning_rate=k.optimizers.schedules.ExponentialDecay(
+                float(lr), decay_steps=50000, decay_rate=0.95, staircase=False, name=None), amsgrad=True),
+                loss='cosine_similarity')
+            pm.fit(x=[embeddings_array, metas_array], y=y_array, epochs=int(epoch), verbose=1,
+                   validation_split=0.1)
+            pm.save(args.out.replace(".h5", "") + "_lr" + lr + "_epoch" + epoch + ".h5")
+else:
+    pm.compile(optimizer=k.optimizers.Adam(learning_rate=k.optimizers.schedules.ExponentialDecay(
+        float(args.lr), decay_steps=50000, decay_rate = 0.95, staircase=False, name=None), amsgrad = True), loss='cosine_similarity')
+    pm.fit(x=[embeddings_array, metas_array], y=y_array, epochs=int(args.epochs), verbose=1, validation_split = 0.1)
+    pm.save(args.out)
