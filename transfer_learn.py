@@ -122,8 +122,8 @@ if os.path.getsize(args.base_model) < 1000:
     print("You might have wrong pm.h5 model. Please download from https://drive.google.com/drive/folders/1Ca3HdV-w8TZPRa9KhPBbjrTtGSmtEIsn")
     sys.exit(0)
 
-if args.out == "":
-    args.out = str(datetime.datetime.now()).replace(" ", "_") + ".h5"
+if ".h5" not in args.out:
+    args.out = args.out + "/" + str(datetime.datetime.now()).replace(" ", "_") + ".h5"
     print("setting model output location to " + args.out)
 if args.filtered_mgf == "":
     #preparing annotated mgf files first
