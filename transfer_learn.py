@@ -15,6 +15,7 @@ random.seed(123)
 import tensorflow as tf
 import tensorflow.keras as k
 from tensorflow.keras import backend as K
+from tensorflow.keras.utils import Sequence
 from coord_tf import CoordinateChannel1D
 
 def parse_spectra(sps):
@@ -241,8 +242,24 @@ metas_array = np.zeros((len(metas), metas[0].shape[0], metas[0].shape[1]))
 for i in range(len(metas)):
     metas_array[idx[i]] = metas[i]
 
+validation_split_idx = int(len(y) * 9 / 10)
+
 #make a version where instead it makes numpy array from list of flattened numpy arrays
 #NOTE: check what shape predict function has it as
+
+class DataGenerator(Sequence):
+    def __init__(self, embedding_set, meta_set, y_set, batch_size):
+        self.embeddings, self.metas, self.y = embedding_set, meta_set, y_set
+        self.batch_size = batch_size
+
+    def __len__(self):
+        return int(np.ceil(len(self.embeddings) / float(self.batch_size)))
+
+    def __getitem__(self, idx):
+        batch_x = [self.embeddings[idx * self.batch_size:(idx + 1) * self.batch_size],
+                   self.metas[idx * self.batch_size:(idx + 1) * self.batch_size]]
+        batch_y = self.y[idx * self.batch_size:(idx + 1) * self.batch_size]
+        return batch_x, batch_y
 
 #pm.fit(x=asnp32(x), y=asnp32(y), epochs=50, verbose=1)
 if "," in args.lr or "," in args.epochs or "," in args.batch_size:
@@ -252,15 +269,31 @@ if "," in args.lr or "," in args.epochs or "," in args.batch_size:
     for lr in lrs:
         for epoch in epochs:
             for batch_s in batch_sizes:
+                train_gen = DataGenerator(embeddings_array[0:validation_split_idx],
+                                          metas_array[0:validation_split_idx],
+                                          y_array[0:validation_split_idx],
+                                          int(batch_s))
+                test_gen = DataGenerator(embeddings_array[validation_split_idx:],
+                                          metas_array[validation_split_idx:],
+                                          y_array[validation_split_idx:],
+                                          int(batch_s))
+
                 pm.compile(optimizer=k.optimizers.Adam(learning_rate=k.optimizers.schedules.ExponentialDecay(
                     float(lr), decay_steps=50000, decay_rate=0.95, staircase=False, name=None), amsgrad=True),
                     loss='cosine_similarity')
-                pm.fit(x=[embeddings_array, metas_array], y=y_array, epochs=int(epoch), batch_size = int(batch_s),
-                       verbose=1, validation_split=0.1)
+                pm.fit(train_gen, epochs=int(epoch), verbose=1, validation_data=test_gen)
                 pm.save(args.out.replace(".h5", "") + "_lr" + lr + "_epoch" + epoch + ".h5")
 else:
+    train_gen = DataGenerator(embeddings_array[0:validation_split_idx],
+                              metas_array[0:validation_split_idx],
+                              y_array[0:validation_split_idx],
+                              int(args.batch_size))
+    test_gen = DataGenerator(embeddings_array[validation_split_idx:],
+                             metas_array[validation_split_idx:],
+                             y_array[validation_split_idx:],
+                             int(args.batch_size))
+
     pm.compile(optimizer=k.optimizers.Adam(learning_rate=k.optimizers.schedules.ExponentialDecay(
         float(args.lr), decay_steps=50000, decay_rate = 0.95, staircase=False, name=None), amsgrad = True), loss='cosine_similarity')
-    pm.fit(x=[embeddings_array, metas_array], y=y_array, epochs=int(args.epochs), batch_size = int(args.batch_size),
-           verbose=1, validation_split = 0.1)
+    pm.fit(train_gen, epochs=int(args.epochs), verbose=1, validation_data=test_gen)
     pm.save(args.out)
