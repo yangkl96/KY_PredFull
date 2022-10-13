@@ -247,6 +247,7 @@ validation_split_idx = int(len(y) * 9 / 10)
 #make a version where instead it makes numpy array from list of flattened numpy arrays
 #NOTE: check what shape predict function has it as
 
+#adapted from https://stackoverflow.com/questions/62916904/failed-copying-input-tensor-from-cpu-to-gpu-in-order-to-run-gatherve-dst-tensor
 class DataGenerator(Sequence):
     def __init__(self, embedding_set, meta_set, y_set, batch_size):
         self.embeddings, self.metas, self.y = embedding_set, meta_set, y_set
@@ -282,6 +283,7 @@ if "," in args.lr or "," in args.epochs or "," in args.batch_size:
                     float(lr), decay_steps=50000, decay_rate=0.95, staircase=False, name=None), amsgrad=True),
                     loss='cosine_similarity')
                 pm.fit(train_gen, epochs=int(epoch), verbose=1, validation_data=test_gen)
+                print("saving " + args.out.replace(".h5", "") + "_lr" + lr + "_epoch" + epoch + ".h5")
                 pm.save(args.out.replace(".h5", "") + "_lr" + lr + "_epoch" + epoch + ".h5")
 else:
     train_gen = DataGenerator(embeddings_array[0:validation_split_idx],
