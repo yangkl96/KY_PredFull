@@ -135,6 +135,8 @@ if args.filtered_mgf == "":
             for file in files:
                 if file == "msms.txt":
                     print(os.path.join(root, file))
+                    if os.path.getsize(os.path.join(root, file)) == 0:
+                        continue
                     df = pd.read_csv(os.path.join(root, file), sep="\t")
                     df = df[df["Score"] >= args.min_score]
                     df = df[df["Fragmentation"].str.lower() == args.fragmentation.lower()]
