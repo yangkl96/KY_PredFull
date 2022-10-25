@@ -106,13 +106,15 @@ parser.add_argument('--base_model', type=str, help='base model to transfer learn
 parser.add_argument('--fragmentation', type=str, help='fragmentation method (HCD, CID, etc)', default = "hcd") #
 parser.add_argument('--min_score', type=int, help='minimum Andromeda score', default = 150)
 parser.add_argument('--nce', type=int, help='normalized collision energy', default = 30)
-parser.add_argument('--epochs', type=str, help='number of epochs to transfer learn model', default = 20)
-parser.add_argument('--batch_size', type=str, help='batch size for training', default = 1024)
-parser.add_argument('--lr', type=str, help='learning rate', default = 0.0003)
+parser.add_argument('--epochs', type=int, help='number of epochs to transfer learn model', default = 20)
+parser.add_argument('--batch_size', type=int, help='batch size for training', default = 1024)
+parser.add_argument('--lr', type=float, help='learning rate', default = 0.0003)
 parser.add_argument('--from_scratch', type=bool, help='whether to retrain entire model', default = False)
 parser.add_argument('--out', type=str, help='filename to save the transfer learned model', default = "")
 parser.add_argument('--processing_only', action=argparse.BooleanOptionalAction,
                     help='whether to just do preprocessing of files', default=False)
+parser.add_argument('--tuner_search', action=argparse.BooleanOptionalAction,
+                    help='whether to do hyperparameter tuner searching', default=False)
 
 args = parser.parse_args()
 if not os.path.exists(args.base_model):
@@ -220,29 +222,28 @@ for sp in old_spectra:
             add = False
     if add:
         spectra.append(sp)
+old_spectra = []
 
 for sp in spectra:
     utils.xshape[0] = max(utils.xshape[0], len(sp["pep"]) + 2)  # update xshape to match max input peptide
 
 #the below is making it seem like there are multiple types of input
-y = [spectrum2vector(sp['mz'], sp['it'], sp['mass'], utils.precision, sp['charge']) for sp in spectra]
+#y = [spectrum2vector(sp['mz'], sp['it'], sp['mass'], utils.precision, sp['charge']) for sp in spectra]
 infos = utils.preprocessor(spectra)
-embeddings = [info for info in infos[0]]
-metas = [info for info in infos[1]]
-idx = list(range(len(y)))
+#embeddings = [info for info in infos[0]]
+#metas = [info for info in infos[1]]
+idx = list(range(len(spectra)))
 random.shuffle(idx)
 
-y_array = np.zeros((len(y), len(y[0])))
-for i in range(len(y)):
-    y_array[idx[i]] = y[i]
-embeddings_array = np.zeros((len(embeddings), embeddings[0].shape[0], embeddings[0].shape[1]))
-for i in range(len(embeddings)):
-    embeddings_array[idx[i]] = embeddings[i]
-metas_array = np.zeros((len(metas), metas[0].shape[0], metas[0].shape[1]))
-for i in range(len(metas)):
-    metas_array[idx[i]] = metas[i]
-
-validation_split_idx = int(len(y) * 9 / 10)
+y_array = np.zeros((len(spectra), utils.dim))
+embeddings_array = np.zeros((len(spectra), infos[0][0].shape[0], infos[0][0].shape[1]))
+metas_array = np.zeros((len(spectra), infos[1][0].shape[0], infos[1][0].shape[1]))
+for i in range(len(spectra)):
+    y_array[idx[i]] = spectrum2vector(spectra[i]['mz'], spectra[i]['it'], spectra[i]['mass'], utils.precision, spectra[i]['charge'])
+    embeddings_array[idx[i]] = infos[0][i]
+    metas_array[idx[i]] = infos[1][i]
+infos = []
+validation_split_idx = int(len(spectra) * 9 / 10)
 
 #make a version where instead it makes numpy array from list of flattened numpy arrays
 #NOTE: check what shape predict function has it as
@@ -264,27 +265,30 @@ class DataGenerator(Sequence):
 
 #pm.fit(x=asnp32(x), y=asnp32(y), epochs=50, verbose=1)
 if "," in args.lr or "," in args.epochs or "," in args.batch_size:
-    lrs = args.lr.split(",")
-    epochs = args.epochs.split(",")
-    batch_sizes = args.batch_size.split(",")
-    for lr in lrs:
-        for epoch in epochs:
-            for batch_s in batch_sizes:
-                train_gen = DataGenerator(embeddings_array[0:validation_split_idx],
-                                          metas_array[0:validation_split_idx],
-                                          y_array[0:validation_split_idx],
-                                          int(batch_s))
+    lrs = [float(lr) for lr in args.lr.split(",")]
+    epochs = [int(epoch) for epoch in args.epochs.split(",")]
+    batch_sizes = [int(batch_s) for batch_s in args.batch_size.split(",")]
+    train_gen = DataGenerator(embeddings_array[0:validation_split_idx], metas_array[0:validation_split_idx],
+                                          y_array[0:validation_split_idx], batch_s)
                 test_gen = DataGenerator(embeddings_array[validation_split_idx:],
                                           metas_array[validation_split_idx:],
                                           y_array[validation_split_idx:],
                                           int(batch_s))
+                pm = k.models.load_model(args.base_model)
+
+                if args.from_scratch: #explicitly state that they are trainable, might be redundant
+                    for layer in pm.layers:
+                        layer.trainable = True
+                else:
+                    for layer in pm.layers[0:len(pm.layers) - 3]:
+                        layer.trainable = False
 
                 pm.compile(optimizer=k.optimizers.Adam(learning_rate=k.optimizers.schedules.ExponentialDecay(
-                    float(lr), decay_steps=50000, decay_rate=0.95, staircase=False, name=None), amsgrad=True),
+                    float(lr), decay_steps=int(validation_split_idx / int(batch_s)), decay_rate = 0.9, staircase=False, name=None), amsgrad = True),
                     loss='cosine_similarity')
                 pm.fit(train_gen, epochs=int(epoch), verbose=1, validation_data=test_gen)
-                print("saving " + args.out.replace(".h5", "") + "_lr" + lr + "_epoch" + epoch + ".h5")
-                pm.save(args.out.replace(".h5", "") + "_lr" + lr + "_epoch" + epoch + ".h5")
+                print("saving " + args.out.replace(".h5", "") + "_lr" + lr + "_epoch" + epoch + "_batch" + batch_s + ".h5")
+                pm.save(args.out.replace(".h5", "") + "_lr" + lr + "_epoch" + epoch + "_batch" + batch_s + ".h5")
 else:
     train_gen = DataGenerator(embeddings_array[0:validation_split_idx],
                               metas_array[0:validation_split_idx],
@@ -296,6 +300,7 @@ else:
                              int(args.batch_size))
 
     pm.compile(optimizer=k.optimizers.Adam(learning_rate=k.optimizers.schedules.ExponentialDecay(
-        float(args.lr), decay_steps=50000, decay_rate = 0.95, staircase=False, name=None), amsgrad = True), loss='cosine_similarity')
+        float(args.lr), decay_steps=int(validation_split_idx / batch_s), decay_rate = 0.9, staircase=False, name=None), amsgrad = True),
+        loss='cosine_similarity')
     pm.fit(train_gen, epochs=int(args.epochs), verbose=1, validation_data=test_gen)
     pm.save(args.out)
