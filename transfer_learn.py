@@ -10,6 +10,7 @@ import utils
 import datetime
 import re
 import random
+
 random.seed(123)
 
 import tensorflow as tf
@@ -18,6 +19,7 @@ from tensorflow.keras import backend as K
 from tensorflow.keras.utils import Sequence
 import keras_tuner
 from coord_tf import CoordinateChannel1D
+
 
 def parse_spectra(sps):
     # ratio constants for NCE
@@ -85,7 +87,7 @@ def spectrum2vector(mz_list, itensity_list, mass, bin_size, charge):
     indexes = np.around(indexes).astype('int32')
 
     for i, index in enumerate(indexes):
-        if index < len(vector): #peaks at 2000 m/z ignored
+        if index < len(vector):  # peaks at 2000 m/z ignored
             vector[index] += itensity_list[i]
 
     # normalize
@@ -99,19 +101,22 @@ def spectrum2vector(mz_list, itensity_list, mass, bin_size, charge):
 
     return vector
 
+
 parser = argparse.ArgumentParser()
-parser.add_argument('--filtered_mgf', type=str, help='mgf to train on', default = "")
+parser.add_argument('--filtered_mgf', type=str, help='mgf to train on', default="")
 parser.add_argument('--mgf_folder', type=str, help='folder with mgf files')
-parser.add_argument('--msms_folder', type=str, help='folder with msms identifications') #
+parser.add_argument('--msms_folder', type=str, help='folder with msms identifications')  #
 parser.add_argument('--base_model', type=str, help='base model to transfer learn on', default="pm.h5")
-parser.add_argument('--fragmentation', type=str, help='fragmentation method (HCD, CID, etc)', default = "hcd") #
-parser.add_argument('--min_score', type=int, help='minimum Andromeda score', default = 150)
-parser.add_argument('--nce', type=int, help='normalized collision energy', default = 30)
-parser.add_argument('--epochs', type=int, help='number of epochs to transfer learn model', default = 20)
-parser.add_argument('--batch_size', type=int, help='batch size for training', default = 1024)
-parser.add_argument('--lr', type=float, help='learning rate', default = 0.0003)
-parser.add_argument('--from_scratch', type=bool, help='whether to retrain entire model', default = False)
-parser.add_argument('--out', type=str, help='filename to save the transfer learned model', default = "")
+parser.add_argument('--fragmentation', type=str, help='fragmentation method (HCD, CID, etc)', default="hcd")  #
+parser.add_argument('--min_score', type=int, help='minimum Andromeda score', default=150)
+parser.add_argument('--nce', type=int, help='normalized collision energy', default=30)
+parser.add_argument('--epochs', type=int, help='number of epochs to transfer learn model', default=50)
+parser.add_argument('--hyperband_iterations', type=int, help='number of hyperband_iterations to transfer learn model',
+                    default=2)
+parser.add_argument('--batch_size', type=int, help='batch size for training', default=32)
+parser.add_argument('--lr', type=float, help='learning rate', default=0.0001)
+parser.add_argument('--from_scratch', type=bool, help='whether to retrain entire model', default=False)
+parser.add_argument('--out', type=str, help='filename to save the transfer learned model', default="")
 parser.add_argument('--processing_only', type=bool,
                     help='whether to just do preprocessing of files', default=False)
 parser.add_argument('--tuner_search', type=bool,
@@ -119,17 +124,19 @@ parser.add_argument('--tuner_search', type=bool,
 
 args = parser.parse_args()
 if not os.path.exists(args.base_model):
-    print("pm.h5 model is missing. Please download from https://drive.google.com/drive/folders/1Ca3HdV-w8TZPRa9KhPBbjrTtGSmtEIsn")
+    print(
+        "pm.h5 model is missing. Please download from https://drive.google.com/drive/folders/1Ca3HdV-w8TZPRa9KhPBbjrTtGSmtEIsn")
     sys.exit(0)
 if os.path.getsize(args.base_model) < 1000:
-    print("You might have wrong pm.h5 model. Please download from https://drive.google.com/drive/folders/1Ca3HdV-w8TZPRa9KhPBbjrTtGSmtEIsn")
+    print(
+        "You might have wrong pm.h5 model. Please download from https://drive.google.com/drive/folders/1Ca3HdV-w8TZPRa9KhPBbjrTtGSmtEIsn")
     sys.exit(0)
 
 if ".h5" not in args.out:
     args.out = args.out + "/" + str(datetime.datetime.now()).replace(" ", "_") + ".h5"
     print("setting model output location to " + args.out)
 if args.filtered_mgf == "":
-    #preparing annotated mgf files first
+    # preparing annotated mgf files first
     filtered_mgf = []
     msms_folders = args.msms_folder.split(",")
     mgf_folders = args.mgf_folder.split(",")
@@ -148,9 +155,14 @@ if args.filtered_mgf == "":
                         continue
 
                     df_dict = {}
+
+
                     def get_dict_entry(x):
-                        df_dict[x["Scan number"]] = x["Modified sequence"][1:len(x["Modified sequence"]) - 1]#.replace("M(ox)", "m")
-                    df.apply(lambda x: get_dict_entry(x), axis = 1)
+                        df_dict[x["Scan number"]] = x["Modified sequence"][
+                                                    1:len(x["Modified sequence"]) - 1]  # .replace("M(ox)", "m")
+
+
+                    df.apply(lambda x: get_dict_entry(x), axis=1)
 
                     # read in potential mgf files
                     mgf_file = mgf_f + "/" + df["Raw file"].values[0] + ".mgf"
@@ -159,26 +171,26 @@ if args.filtered_mgf == "":
                     spectra = readmgf(mgf_file)
 
                     for sp in spectra:
-                        #check if sp is suitable for inclusion, based on predfull data preprocessing standards, and has ID
+                        # check if sp is suitable for inclusion, based on predfull data preprocessing standards, and has ID
                         length = len(sp["mz"])
                         scan_num = int(sp["pep"].split(" ")[0].split(".")[1])
-                        if length > 20: #underfragmented
-                            if length < 500: #overfragmented
+                        if length > 20:  # underfragmented
+                            if length < 500:  # overfragmented
                                 if scan_num in df_dict.keys():
-                                    #can't seem to find entries with >200 ppm difference?
+                                    # can't seem to find entries with >200 ppm difference?
                                     sp["params"] = {}
                                     sp["params"]["charge"] = sp["charge"]
                                     sp["params"]["pepmass"] = sp["mass"]
                                     sp["params"]["seq"] = df_dict[scan_num]
-                                    #MAX_PEPTIDE_LENGTH = np.max(MAX_PEPTIDE_LENGTH, df_dict[scan_num] + 2)
-                                    sp["params"]["nce"] = args.nce #can try making charge dependent, and add a default
+                                    # MAX_PEPTIDE_LENGTH = np.max(MAX_PEPTIDE_LENGTH, df_dict[scan_num] + 2)
+                                    sp["params"]["nce"] = args.nce  # can try making charge dependent, and add a default
                                     sp["m/z array"] = sp["mz"]
                                     sp["intensity array"] = sp["it"]
                                     filtered_mgf.append(sp)
-#            if len(filtered_mgf) > 0:
-#                break
+    #            if len(filtered_mgf) > 0:
+    #                break
     print("writing filtered mgf at " + mgf_folders[0] + "/filtered.mgf")
-    mgf.write(filtered_mgf, output = mgf_folders[0] + "/filtered.mgf", file_mode = "w")
+    mgf.write(filtered_mgf, output=mgf_folders[0] + "/filtered.mgf", file_mode="w")
     args.filtered_mgf = mgf_folders[0] + "/filtered.mgf"
 if args.processing_only:
     print("processing done")
@@ -196,48 +208,15 @@ for sp in old_spectra:
             add = False
     if add:
         spectra.append(sp)
-old_spectra = []
+# old_spectra = None
 
 for sp in spectra:
     utils.xshape[0] = max(utils.xshape[0], len(sp["pep"]) + 2)  # update xshape to match max input peptide
 
-#infos = utils.preprocessor(spectra)
-#idx = list(range(len(spectra)))
-#random.shuffle(idx)
-
-#y_array = np.zeros((len(spectra), utils.dim))
-#embeddings_array = np.zeros((len(spectra), infos[0][0].shape[0], infos[0][0].shape[1]))
-#metas_array = np.zeros((len(spectra), infos[1][0].shape[0], infos[1][0].shape[1]))
-#for i in range(len(spectra)):
-#    y_array[idx[i]] = spectrum2vector(spectra[i]['mz'], spectra[i]['it'], spectra[i]['mass'], utils.precision, spectra[i]['charge'])
-#    embeddings_array[idx[i]] = infos[0][i]
-#    metas_array[idx[i]] = infos[1][i]
-#infos = []
 validation_split_idx = int(len(spectra) * 9 / 10)
-#print(y_array.shape)
-#print(embeddings_array.shape)
-#print(metas_array.shape)
 
-y = [spectrum2vector(sp['mz'], sp['it'], sp['mass'], utils.precision, sp['charge']) for sp in spectra]
-infos = utils.preprocessor(spectra)
-embeddings = [info for info in infos[0]]
-metas = [info for info in infos[1]]
-idx = list(range(len(y)))
-random.shuffle(idx)
-y_array = np.zeros((len(y), len(y[0])))
-for i in range(len(y)):
-    y_array[idx[i]] = y[i]
-embeddings_array = np.zeros((len(embeddings), embeddings[0].shape[0], embeddings[0].shape[1]))
-for i in range(len(embeddings)):
-    embeddings_array[idx[i]] = embeddings[i]
-metas_array = np.zeros((len(metas), metas[0].shape[0], metas[0].shape[1]))
-for i in range(len(metas)):
-    metas_array[idx[i]] = metas[i]
 
-#make a version where instead it makes numpy array from list of flattened numpy arrays
-#NOTE: check what shape predict function has it as
-
-#adapted from https://stackoverflow.com/questions/62916904/failed-copying-input-tensor-from-cpu-to-gpu-in-order-to-run-gatherve-dst-tensor
+# adapted from https://stackoverflow.com/questions/62916904/failed-copying-input-tensor-from-cpu-to-gpu-in-order-to-run-gatherve-dst-tensor
 class DataGenerator(Sequence):
     def __init__(self, embedding_set, meta_set, y_set, batch_size):
         self.embeddings, self.metas, self.y = embedding_set, meta_set, y_set
@@ -252,33 +231,127 @@ class DataGenerator(Sequence):
         batch_y = self.y[idx * self.batch_size:(idx + 1) * self.batch_size]
         return batch_x, batch_y
 
-train_gen = DataGenerator(embeddings_array[0:validation_split_idx], metas_array[0:validation_split_idx],
-                          y_array[0:validation_split_idx], args.batch_size)
-test_gen = DataGenerator(embeddings_array[validation_split_idx:], metas_array[validation_split_idx:],
-                         y_array[validation_split_idx:], args.batch_size)
 
-pm = k.models.load_model(args.base_model)
-#if we want to replace final CNN layer
-#could have option to retrain entire thing
-if args.from_scratch: #explicitly state that they are trainable, might be redundant
-    for layer in pm.layers:
-        layer.trainable = True
-else:
-    for layer in pm.layers[0:len(pm.layers) - 3]:
-        layer.trainable = False
-    for layer in pm.layers[len(pm.layers) - 3:]:
-        layer.trainable = False
+class DataGeneratorLite(Sequence):
+    def __init__(self, embedding_set, meta_set, y_set, batch_size):
+        self.embeddings, self.metas, self.y = embedding_set, meta_set, y_set
+        self.batch_size = batch_size
 
-pm.compile(optimizer=k.optimizers.Adam(learning_rate=k.optimizers.schedules.ExponentialDecay(
-        float(args.lr), decay_steps=int(validation_split_idx / args.batch_size), decay_rate = 0.9, staircase=False, name=None), amsgrad = True),
-        loss='cosine_similarity')
-pm.fit(train_gen, epochs=args.epochs, verbose=1, validation_data=test_gen)
+    def __len__(self):
+        return int(np.ceil(len(self.embeddings) / float(self.batch_size)))
+
+    def __getitem__(self, idx):
+        subset_embeddings = self.embeddings[idx * self.batch_size:(idx + 1) * self.batch_size]
+        subset_metas = self.metas[idx * self.batch_size:(idx + 1) * self.batch_size]
+        subset_y = self.y[idx * self.batch_size:(idx + 1) * self.batch_size]
+
+        batch_x = [np.zeros((len(subset_embeddings), self.embeddings[0].shape[0], self.embeddings[0].shape[1])),
+                   np.zeros((len(subset_metas), self.metas[0].shape[0], self.metas[0].shape[1]))]
+        batch_y = np.zeros((len(subset_y), len(self.y[0])))
+
+        for j in range(len(subset_embeddings)):
+            batch_x[0][j] = subset_embeddings[j]
+            batch_x[1][j] = subset_metas[j]
+            batch_y[j] = subset_y[j]
+
+        return batch_x, batch_y
+
+
+print("Processing")
+idxs = list(range(len(spectra)))
+random.shuffle(idxs)
+y = [spectrum2vector(spectra[i]['mz'], spectra[i]['it'], spectra[i]['mass'], utils.precision, spectra[i]['charge'])
+     for i in idxs]
+infos = utils.preprocessor(spectra)
+embeddings = [infos[0][i] for i in idxs]
+metas = [infos[1][i] for i in idxs]
+
+#train_gen = None
+#test_gen = None
+
+try:  # when memory is not an issue
+    y_array = np.zeros((len(y), len(y[0])))
+    for i in range(len(y)):
+        y_array[i] = y[i]
+    embeddings_array = np.zeros((len(embeddings), embeddings[0].shape[0], embeddings[0].shape[1]))
+    for i in range(len(embeddings)):
+        embeddings_array[i] = embeddings[i]
+    metas_array = np.zeros((len(metas), metas[0].shape[0], metas[0].shape[1]))
+    for i in range(len(metas)):
+        metas_array[i] = metas[i]
+
+    train_gen = DataGenerator(embeddings_array[0:validation_split_idx], metas_array[0:validation_split_idx],
+                              y_array[0:validation_split_idx], args.batch_size)
+    test_gen = DataGenerator(embeddings_array[validation_split_idx:], metas_array[validation_split_idx:],
+                             y_array[validation_split_idx:], args.batch_size)
+except:
+    print("Using lite mode")
+    train_gen = DataGeneratorLite(embeddings[0:validation_split_idx], metas[0:validation_split_idx],
+                                  y[0:validation_split_idx], args.batch_size)
+    test_gen = DataGeneratorLite(embeddings[validation_split_idx:], metas[validation_split_idx:],
+                                 y[validation_split_idx:], args.batch_size)
+
+def call_existing_code(lr, batch_size):
+    pm = k.models.load_model(args.base_model)
+    # if we want to replace final CNN layer
+    # could have option to retrain entire thing
+    if args.from_scratch:  # explicitly state that they are trainable, might be redundant
+        for layer in pm.layers:
+            layer.trainable = True
+    else:
+        for layer in pm.layers[0:len(pm.layers) - 3]:
+            layer.trainable = False
+        for layer in pm.layers[len(pm.layers) - 3:]:
+            layer.trainable = True
+
+    pm.compile(optimizer=k.optimizers.Adam(learning_rate=k.optimizers.schedules.ExponentialDecay(
+        float(lr), decay_steps=int(validation_split_idx / batch_size), decay_rate=0.9, staircase=False,
+        name=None), amsgrad=True), loss='cosine_similarity')
+    return pm
+
+
+def build_model(hp):
+    lr = hp.Float("lr", min_value=1e-4, max_value=1e-2, sampling="log")
+    batch_size = hp.Choice("batch_size", [32, 128, 512])
+    # call existing model-building code with the hyperparameter values.
+    model = call_existing_code(lr, batch_size)
+    return model
+
+
+stop_early = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
+
 if args.tuner_search:
-    pm.fit(train_gen, epochs=args.epochs, verbose=1, validation_data=test_gen)
-    pm.save(args.out)
-    #model_name = args.out.replace(".h5", "") + "_lr" + args.lrs + "_epoch" + args.epochs + "_batch" + args.batch_size + ".h5"
-    #print("saving " + model_name)
-    #pm.save(model_name)
+    tuner = keras_tuner.Hyperband(build_model, objective="val_loss", max_epochs=args.epochs, directory='hcd_tuning',
+                                  project_name='testing', overwrite=True,
+                                  hyperband_iterations=args.hyperband_iterations,
+                                  distribution_strategy=tf.distribute.MirroredStrategy())
+    print(tuner.search_space_summary())
+
+    tuner.search(train_gen, verbose=1, validation_data=test_gen, callbacks=[stop_early])
+    print(tuner.results_summary())
+    best_hps = tuner.get_best_hyperparameters(num_trials=1)[0]
+    model = tuner.hypermodel.build(best_hps)
+    print("building final model")
+    history = model.fit(train_gen, verbose=1, validation_data=test_gen, callbacks=[stop_early], epochs=args.epochs)
+    model.save(args.out)
+    # model_name = args.out.replace(".h5", "") + "_lr" + args.lrs + "_epoch" + args.epochs + "_batch" + args.batch_size + ".h5"
+    # print("saving " + model_name)
+    # pm.save(model_name)
 else:
-    pm.fit(train_gen, epochs=args.epochs, verbose=1, validation_data=test_gen)
+    pm = k.models.load_model(args.base_model)
+    # if we want to replace final CNN layer
+    # could have option to retrain entire thing
+    if args.from_scratch:  # explicitly state that they are trainable, might be redundant
+        for layer in pm.layers:
+            layer.trainable = True
+    else:
+        for layer in pm.layers[0:len(pm.layers) - 3]:
+            layer.trainable = False
+        for layer in pm.layers[len(pm.layers) - 3:]:
+            layer.trainable = True
+
+    pm.compile(optimizer=k.optimizers.Adam(learning_rate=k.optimizers.schedules.ExponentialDecay(
+        float(args.lr), decay_steps=int(validation_split_idx / args.batch_size), decay_rate=0.9, staircase=False,
+        name=None), amsgrad=True), loss='cosine_similarity')
+    pm.fit(train_gen, epochs=args.epochs, verbose=1, validation_data=test_gen, callbacks=[stop_early])
     pm.save(args.out)
