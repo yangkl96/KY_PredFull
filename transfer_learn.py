@@ -140,6 +140,8 @@ if args.filtered_mgf == "":
     filtered_mgf = []
     msms_folders = args.msms_folder.split(",")
     mgf_folders = args.mgf_folder.split(",")
+    #iterate through mgf/df_dict pairs
+    #need to only keep best PSM across all files
     for msms_f, mgf_f in zip(msms_folders, mgf_folders):
         print(msms_f + ";" + mgf_f)
         for root, dirs, files in os.walk(msms_f):
@@ -189,9 +191,9 @@ if args.filtered_mgf == "":
                                     filtered_mgf.append(sp)
     #            if len(filtered_mgf) > 0:
     #                break
-    print("writing filtered mgf at " + mgf_folders[0] + "/filtered.mgf")
-    mgf.write(filtered_mgf, output=mgf_folders[0] + "/filtered.mgf", file_mode="w")
-    args.filtered_mgf = mgf_folders[0] + "/filtered.mgf"
+    print("writing filtered mgf at filtered_" + args.fragmentation + ".mgf")
+    mgf.write(filtered_mgf, output="filtered_" + args.fragmentation + ".mgf", file_mode="w")
+    args.filtered_mgf = "filtered_" + args.fragmentation + ".mgf"
 if args.processing_only:
     print("processing done")
     sys.exit(0)

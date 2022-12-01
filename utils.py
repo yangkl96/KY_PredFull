@@ -141,7 +141,7 @@ def embed(spectrum, mass_scale=200, embedding=None, pep=None):  # changed mass s
 
     return embedding #order of embedding is 0: padding, 1-20: 20 aa, 23: ending, 24: monoisotopic mass, 25: position info, 26:unmodified, 27: oxM
 
-def make_meta(sp, meta=np.zeros(meta_shape, dtype='float32')):
+def make_meta(sp, meta=np.zeros(meta_shape, dtype='float32')): #modify to have hcd, cid, etd, energies in different positions
     pep = sp['pep']
     meta[0][sp['charge'] - 1] = 1  # charge
     meta[1][sp['type']] = 1  # ftype
@@ -216,6 +216,6 @@ def tomgf(sp, y):
 
     # mzs *= 1.00052
 
-    peaks = [f"{f2(mz)} {f4(it * 1000)}" for mz, it in zip(mzs, its)]
+    peaks = [f"{f2(mz)} {f4(it * 1000)}" for mz, it in zip(mzs, its) if it >= 0.01]
 
     return head + '\n'.join(peaks) + '\nEND IONS'
